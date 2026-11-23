@@ -8,7 +8,6 @@
             <AppIcon :name="m.icon" :size="17" /><span>{{ m.label }}</span>
           </router-link>
         </nav>
-        <p class="aside-foot mono">QQ 3074423966 · 抖音号 HAQI2026</p>
       </aside>
 
       <div class="admin-main">
@@ -82,13 +81,6 @@ const menu = [
   border-left-color: var(--accent);
 }
 
-.aside-foot {
-  margin: 18px 10px 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--muted);
-}
 
 .admin-main {
   min-width: 0;
@@ -110,9 +102,6 @@ const menu = [
   }
 
   .aside-title,
-  .aside-foot {
-    display: none;
-  }
 
   .admin-nav {
     flex-direction: row;

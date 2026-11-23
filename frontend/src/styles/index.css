@@ -564,10 +564,6 @@ button {
   border-bottom: none;
 }
 
-.author-line {
-  color: var(--muted);
-  font: 400 12px var(--mono);
-}
 
 /* ========== Element Plus 细节 ========== */
 .el-button {

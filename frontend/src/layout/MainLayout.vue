@@ -66,7 +66,6 @@
             <span>退出登录</span>
           </button>
         </nav>
-        <p class="author-line m-author">QQ 3074423966 · 抖音号 HAQI2026</p>
       </div>
     </transition>
 
@@ -77,7 +76,6 @@
     <footer class="foot">
       <div class="foot-in">
         <span>智慧教育平台 · 华为 ICT 学院课程项目</span>
-        <span class="author-line">QQ 3074423966 · 抖音号 HAQI2026</span>
       </div>
     </footer>
   </div>
@@ -344,10 +342,6 @@ watch(
   color: var(--muted);
 }
 
-.m-author {
-  margin-top: auto;
-  padding: 16px 12px 8px;
-}
 
 .mnav-enter-active,
 .mnav-leave-active {

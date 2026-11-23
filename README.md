@@ -321,10 +321,6 @@ python -m pytest tests -q
   </tr>
 </table>
 
-## 作者
-
-QQ 3074423966 · 抖音号 HAQI2026
-
 ## 许可证
 
 [MIT](LICENSE)

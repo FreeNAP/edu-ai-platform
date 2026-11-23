@@ -24,7 +24,6 @@
             </li>
           </ul>
         </div>
-        <p class="author-line desktop-only">QQ 3074423966 · 抖音号 HAQI2026</p>
       </section>
 
       <section class="form-panel">
@@ -144,7 +143,6 @@
             <span class="text-sub">想起来了？<el-link type="primary" :underline="false" @click="go('login')">去登录</el-link></span>
           </div>
         </el-form>
-        <p class="author-line mobile-only m-author">QQ 3074423966 · 抖音号 HAQI2026</p>
       </section>
     </div>
   </div>
@@ -433,10 +431,6 @@ async function doReset() {
   letter-spacing: 0.08em;
 }
 
-.m-author {
-  margin-top: 24px;
-  text-align: center;
-}
 
 @media (max-width: 860px) {
   .auth-box {
