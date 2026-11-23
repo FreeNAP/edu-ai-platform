@@ -325,7 +325,7 @@ async function openOutline(row) {
       _k: nextKey(),
       id: ch.id,
       title: ch.title,
-      lessons: (ch.lessons || []).map((ls) => ({ _k: nextKey(), id: ls.id, title: ls.title, duration: ls.duration || '', kind: ls.kind === 'text' ? 'article' : ls.kind || 'video', content: ls.content || '' }))
+      lessons: (ch.lessons || []).map((ls) => ({ _k: nextKey(), id: ls.id, title: ls.title, duration: ls.duration || '', kind: ls.kind === 'text' ? 'article' : ls.kind || 'video', content: ls.content || '', video_url: ls.video_url || '' }))
     }))
   } catch (e) {
     ElMessage.error(e.message)
@@ -344,7 +344,7 @@ async function onSaveOutline() {
     const payload = outline.value.map((ch) => ({
       id: ch.id || undefined,
       title: ch.title.trim(),
-      lessons: ch.lessons.map((ls) => ({ id: ls.id || undefined, title: ls.title.trim(), duration: ls.duration || null, kind: ls.kind, content: ls.content }))
+      lessons: ch.lessons.map((ls) => ({ id: ls.id || undefined, title: ls.title.trim(), duration: ls.duration || null, kind: ls.kind, content: ls.content, video_url: ls.video_url || '' }))
     }))
     await adminSaveOutline(outlineCourse.value.id, payload)
     ElMessage.success('目录已保存')
