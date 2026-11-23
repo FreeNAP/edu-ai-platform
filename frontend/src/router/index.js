@@ -61,6 +61,18 @@ const routes = [
         meta: { title: 'AI 面试' }
       },
       {
+        path: 'quiz/:id',
+        name: 'quiz',
+        component: () => import('../views/quiz/QuizPage.vue'),
+        meta: { title: '测验' }
+      },
+      {
+        path: 'teacher',
+        name: 'teacher',
+        component: () => import('../views/teacher/TeacherConsole.vue'),
+        meta: { title: '教师工作台', teacher: true }
+      },
+      {
         path: 'ai',
         name: 'ai',
         component: () => import('../views/ai/AiAssistant.vue'),
@@ -103,10 +115,17 @@ const routes = [
           { path: 'jobs', name: 'admin-jobs', component: () => import('../views/admin/AdminJobs.vue'), meta: { title: '职位管理' } },
           { path: 'orders', name: 'admin-orders', component: () => import('../views/admin/AdminOrders.vue'), meta: { title: '订单管理' } },
           { path: 'applications', name: 'admin-applications', component: () => import('../views/admin/AdminApplications.vue'), meta: { title: '申请管理' } },
+          { path: 'audit', name: 'admin-audit', component: () => import('../views/admin/AdminAudit.vue'), meta: { title: '操作日志' } },
           { path: 'community', name: 'admin-community', component: () => import('../views/admin/AdminCommunity.vue'), meta: { title: '社区管理' } }
         ]
       }
     ]
+  },
+  {
+    path: '/certificate/:no',
+    name: 'certificate',
+    component: () => import('../views/quiz/CertificatePage.vue'),
+    meta: { public: true, title: '证书查验' }
   },
   {
     path: '/:pathMatch(.*)*',
@@ -133,6 +152,15 @@ router.beforeEach((to) => {
   // 已登录访问登录/注册页 → 首页
   if ((to.name === 'login' || to.name === 'register') && token) {
     return { path: '/' }
+  }
+  // 教师工作台：教师或管理员
+  if (to.matched.some((r) => r.meta.teacher)) {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || 'null')
+      if (!['teacher', 'admin'].includes(user?.role)) return { path: '/' }
+    } catch {
+      return { path: '/' }
+    }
   }
   // admin 页面校验角色
   if (to.matched.some((r) => r.meta.admin)) {

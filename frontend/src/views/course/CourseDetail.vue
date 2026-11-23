@@ -74,6 +74,20 @@
             </div>
           </el-tab-pane>
 
+          <el-tab-pane :label="`测验与考试（${quizzes.length}）`" name="quizzes">
+            <el-empty v-if="!quizzes.length" description="这门课还没有测验" />
+            <div v-for="q in quizzes" :key="q.id" class="quiz-item">
+              <div class="quiz-main">
+                <b>{{ q.title }}</b>
+                <span class="text-sub">{{ q.kind === 'exam' ? '结业考试，通过发证书' : '课时测验' }} · {{ q.question_count }} 题 · 及格 {{ q.pass_score }} 分<template v-if="q.time_limit_minutes"> · 限时 {{ q.time_limit_minutes }} 分钟</template></span>
+              </div>
+              <span v-if="q.best_score != null" class="tag" :class="q.passed ? 'tag-accent' : ''">最好 {{ q.best_score }} 分</span>
+              <el-button size="small" :type="q.kind === 'exam' ? 'primary' : 'default'" :disabled="!detail.is_enrolled" @click="$router.push(`/quiz/${q.id}`)">
+                {{ detail.is_enrolled ? (q.attempts ? '再做一次' : '开始') : '报名后可做' }}
+              </el-button>
+            </div>
+          </el-tab-pane>
+
           <el-tab-pane label="讲师信息" name="lecturer">
             <div v-if="detail.lecturer" class="lecturer-box">
               <UserAvatar :user="{ avatar: detail.lecturer.avatar }" :size="64" />
@@ -141,7 +155,8 @@ import {
   getCourseComments,
   postCourseComment
 } from '../../api/course'
-import { categoryLabel, difficultyType, fmtMinutes, fmtDate, LESSON_KIND } from '../../utils'
+import { categoryLabel, fmtMinutes, fmtDate, LESSON_KIND } from '../../utils'
+import { getCourseQuizzes } from '../../api/quiz'
 import CourseCover from '../../components/CourseCover.vue'
 import UserAvatar from '../../components/UserAvatar.vue'
 import AppIcon from '../../components/icons/AppIcon.vue'
@@ -153,6 +168,7 @@ const id = route.params.id
 const loading = ref(true)
 const detail = ref(null)
 const tab = ref('intro')
+const quizzes = ref([])
 const enrolling = ref(false)
 const commenting = ref(false)
 const commentForm = reactive({ rating: 5, content: '' })
@@ -168,6 +184,7 @@ async function fetchDetail() {
   loading.value = true
   try {
     detail.value = await getCourseDetail(id)
+    getCourseQuizzes(id).then((list) => (quizzes.value = list || [])).catch(() => (quizzes.value = []))
   } catch (e) {
     detail.value = null
     ElMessage.error(e.message)
@@ -244,6 +261,26 @@ onMounted(fetchDetail)
 </script>
 
 <style scoped>
+.quiz-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.quiz-item:last-child {
+  border-bottom: 0;
+}
+
+.quiz-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .detail-head {
   display: block;
 }

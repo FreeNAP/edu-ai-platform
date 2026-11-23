@@ -26,7 +26,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '../../lib/echarts'
 import { getAdminStats } from '../../api/admin'
 import { fmtMinutes } from '../../utils'
 import AppIcon from '../../components/icons/AppIcon.vue'

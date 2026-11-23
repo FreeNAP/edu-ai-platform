@@ -48,10 +48,19 @@
             <span class="tag tag-line mono">{{ fmtMinutes(current.duration) }}</span>
           </div>
 
-          <!-- 视频占位播放器 -->
-          <div v-if="current.kind === 'video'" class="mock-player">
+          <!-- 视频：有地址时播放真实视频，否则显示占位 -->
+          <video
+            v-if="current.kind === 'video' && current.video_url"
+            :key="current.id"
+            class="video-player"
+            :src="current.video_url"
+            controls
+            preload="metadata"
+            controlslist="nodownload"
+          ></video>
+          <div v-else-if="current.kind === 'video'" class="mock-player">
             <AppIcon name="play" :size="48" :stroke="1.4" />
-            <div class="mock-tip">演示环境不提供视频文件，按下方讲义学习即可</div>
+            <div class="mock-tip">这节课还没有上传视频，先看下方讲义</div>
             <div class="mock-bar"><i :style="{ width: playPercent + '%' }" /></div>
           </div>
 
@@ -371,6 +380,14 @@ onBeforeUnmount(() => {
   letter-spacing: -0.01em;
   flex: 1;
   min-width: 200px;
+}
+
+.video-player {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
 }
 
 .mock-player {

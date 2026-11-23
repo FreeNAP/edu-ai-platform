@@ -26,6 +26,7 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="me"><AppIcon name="user" :size="16" />个人中心</el-dropdown-item>
+                <el-dropdown-item v-if="store.isTeacher" command="teacher"><AppIcon name="layers" :size="16" />教师工作台</el-dropdown-item>
                 <el-dropdown-item v-if="store.isAdmin" command="admin"><AppIcon name="settings" :size="16" />后台管理</el-dropdown-item>
                 <el-dropdown-item command="logout" divided><AppIcon name="logout" :size="16" />退出登录</el-dropdown-item>
               </el-dropdown-menu>
@@ -108,6 +109,7 @@ const mobileItems = computed(() => [
   ...navItems,
   { to: '/notifications', label: '通知中心', icon: 'bell' },
   { to: '/me', label: '个人中心', icon: 'user' },
+  ...(store.isTeacher ? [{ to: '/teacher', label: '教师工作台', icon: 'layers' }] : []),
   ...(store.isAdmin ? [{ to: '/admin', label: '后台管理', icon: 'settings' }] : [])
 ])
 
@@ -121,6 +123,7 @@ async function onCommand(cmd) {
   drawer.value = false
   if (cmd === 'me') router.push('/me')
   else if (cmd === 'admin') router.push('/admin')
+  else if (cmd === 'teacher') router.push('/teacher')
   else if (cmd === 'logout') {
     try {
       await ElMessageBox.confirm('确定要退出登录吗？', '退出登录', {

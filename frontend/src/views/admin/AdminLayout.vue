@@ -28,7 +28,8 @@ const menu = [
   { path: '/admin/jobs', label: '职位', icon: 'briefcase' },
   { path: '/admin/orders', label: '订单', icon: 'receipt' },
   { path: '/admin/applications', label: '职位申请', icon: 'clipboard' },
-  { path: '/admin/community', label: '社区', icon: 'community' }
+  { path: '/admin/community', label: '社区', icon: 'community' },
+  { path: '/admin/audit', label: '操作日志', icon: 'doc' }
 ]
 </script>
 

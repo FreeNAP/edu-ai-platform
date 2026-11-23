@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint src",
+    "test": "vitest run"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -20,7 +22,15 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
     "@vitejs/plugin-vue": "^5.2.1",
-    "vite": "^5.4.11"
+    "eslint": "9.39.1",
+    "eslint-plugin-vue": "10.12.1",
+    "globals": "17.14.0",
+    "jsdom": "25.0.1",
+    "unplugin-auto-import": "0.18.6",
+    "unplugin-vue-components": "0.27.5",
+    "vite": "^5.4.11",
+    "vitest": "2.1.9"
   }
 }

@@ -53,7 +53,9 @@
           <el-select v-model="chatCourseId" placeholder="关联课程（可选）" clearable style="width: 240px">
             <el-option v-for="c in myCourses" :key="c.id" :label="c.title" :value="c.id" />
           </el-select>
-          <span class="text-sub mono">{{ currentSessionId ? `会话 #${currentSessionId}` : '新会话' }}</span>
+          <span class="text-sub mono">
+            <template v-if="usage && !usage.unlimited">今日剩余 {{ usage.remaining }} / {{ usage.limit }} 次 · </template>{{ currentSessionId ? `会话 #${currentSessionId}` : '新会话' }}
+          </span>
         </div>
 
         <div ref="msgBox" class="msg-list" v-loading="sessionLoading">
@@ -246,12 +248,13 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '../../lib/echarts'
 import AppIcon from '../../components/icons/AppIcon.vue'
 import {
-  aiChat, getChatSessions, getChatSession, deleteChatSession,
-  getLearningPath, gradeCode, getReport
+  getChatSessions, getChatSession, deleteChatSession,
+  getLearningPath, gradeCode, getReport, getAiUsage
 } from '../../api/ai'
+import { postStream } from '../../api/stream'
 import { getMyEnrollments } from '../../api/course'
 import { fmtMinutes, fmtDay } from '../../utils'
 
@@ -335,19 +338,41 @@ async function onSend(preset) {
   if (typeof preset !== 'string') input.value = ''
   sending.value = true
   scrollBottom()
+  const reply = reactive({ role: 'assistant', content: '' })
   try {
     const payload = { message: text }
     if (currentSessionId.value) payload.session_id = currentSessionId.value
     if (chatCourseId.value) payload.course_id = chatCourseId.value
-    const res = await aiChat(payload)
-    if (res?.session_id) currentSessionId.value = res.session_id
-    messages.value.push({ role: 'assistant', content: res?.reply || '（没有拿到回复）' })
+    let started = false
+    await postStream('/ai/chat/stream', payload, (event, data) => {
+      if (event === 'meta' && data.session_id) currentSessionId.value = data.session_id
+      if (event === 'delta') {
+        if (!started) {
+          started = true
+          sending.value = false
+          messages.value.push(reply)
+        }
+        reply.content += data.text || ''
+        scrollBottom()
+      }
+    })
+    if (!started) messages.value.push({ role: 'assistant', content: '（没有拿到回复）' })
     loadSessions()
+    loadUsage()
   } catch (e) {
     messages.value.push({ role: 'assistant', content: `出错了：${e.message}` })
   } finally {
     sending.value = false
     scrollBottom()
+  }
+}
+
+const usage = ref(null)
+async function loadUsage() {
+  try {
+    usage.value = await getAiUsage()
+  } catch {
+    usage.value = null
   }
 }
 
@@ -519,6 +544,7 @@ onMounted(async () => {
   if (TAB_KEYS.includes(route.query.tab)) tab.value = route.query.tab
   const pendingQ = takeQuestion()
   loadSessions()
+  loadUsage()
   try {
     const list = (await getMyEnrollments()) || []
     myCourses.value = list.map((e) => e.course || e).filter((c) => c?.id)

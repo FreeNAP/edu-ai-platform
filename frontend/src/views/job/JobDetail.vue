@@ -74,7 +74,7 @@
     </el-empty>
 
     <!-- 申请弹窗 -->
-    <el-dialog v-model="applyVisible" title="申请职位" width="480px">
+    <el-dialog v-model="applyVisible" title="申请职位" width="min(480px, 94vw)">
       <el-form label-position="top">
         <el-form-item :label="`申请岗位：${job?.title || ''}`">
           <el-input
@@ -85,6 +85,15 @@
             show-word-limit
             placeholder="附言（可选）：自我介绍、做过的项目、可到岗时间"
           />
+        </el-form-item>
+        <el-form-item label="简历">
+          <div class="resume-row">
+            <a v-if="store.user?.resume_url" :href="store.user.resume_url" target="_blank" rel="noopener" class="resume-link">已上传的简历会一起投递</a>
+            <span v-else class="text-sub">还没有上传简历</span>
+            <el-upload :show-file-list="false" accept=".pdf,.docx" :http-request="(o) => uploadResume(o.file)">
+              <el-button size="small" :loading="uploadingResume">{{ store.user?.resume_url ? '换一份' : '上传简历' }}</el-button>
+            </el-upload>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -100,6 +109,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getJobDetail, toggleJobFavorite, applyJob, createInterview } from '../../api/job'
+import { uploadFile } from '../../api/upload'
+import { useUserStore } from '../../stores/user'
 import { fmtDay } from '../../utils'
 import AppIcon from '../../components/icons/AppIcon.vue'
 
@@ -144,6 +155,22 @@ async function onFavorite() {
   }
 }
 
+const store = useUserStore()
+const uploadingResume = ref(false)
+
+async function uploadResume(file) {
+  uploadingResume.value = true
+  try {
+    const res = await uploadFile('resume', file)
+    await store.updateProfile({ resume_url: res.url })
+    ElMessage.success('简历已上传')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    uploadingResume.value = false
+  }
+}
+
 async function onApply() {
   applying.value = true
   try {
@@ -177,6 +204,18 @@ onMounted(fetchDetail)
 </script>
 
 <style scoped>
+.resume-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.resume-link {
+  color: var(--accent);
+  font-size: 13px;
+}
+
 .job-head {
   align-items: flex-end;
 }

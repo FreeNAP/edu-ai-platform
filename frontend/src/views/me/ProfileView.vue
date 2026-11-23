@@ -46,7 +46,24 @@
                 <AppIcon name="user" :size="22" />
               </button>
             </div>
-            <el-input v-model="profileForm.avatar" placeholder="也可以粘贴图片地址（https://…）" class="mt-12" />
+            <div class="upload-row mt-12">
+              <el-upload :show-file-list="false" accept="image/png,image/jpeg,image/gif,image/webp" :http-request="(o) => doUpload('avatar', o.file)">
+                <el-button :loading="uploading === 'avatar'">上传头像图片</el-button>
+              </el-upload>
+              <span class="text-sub">PNG / JPG / GIF / WEBP，5MB 以内</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="个人简介">
+            <el-input v-model="profileForm.bio" type="textarea" :rows="3" maxlength="500" show-word-limit placeholder="学习方向、做过的项目、想找的岗位" />
+          </el-form-item>
+          <el-form-item label="简历">
+            <div class="upload-row">
+              <el-upload :show-file-list="false" accept=".pdf,.docx" :http-request="(o) => doUpload('resume', o.file)">
+                <el-button :loading="uploading === 'resume'">{{ profileForm.resume_url ? '重新上传' : '上传简历' }}</el-button>
+              </el-upload>
+              <a v-if="profileForm.resume_url" :href="profileForm.resume_url" target="_blank" rel="noopener" class="resume-link">查看当前简历</a>
+              <span class="text-sub">PDF / DOCX，10MB 以内，投递职位时自动附上</span>
+            </div>
           </el-form-item>
           <el-button type="primary" :loading="savingProfile" @click="onSaveProfile">保存</el-button>
         </el-form>
@@ -183,6 +200,19 @@
         </div>
       </el-tab-pane>
 
+      <!-- 我的证书 -->
+      <el-tab-pane label="我的证书" name="certificates">
+        <el-empty v-if="!certificates.length" description="通过课程结业考试后会在这里发放证书" />
+        <div v-else class="cert-grid">
+          <router-link v-for="c in certificates" :key="c.cert_no" :to="`/certificate/${c.cert_no}`" class="panel cert hover-card">
+            <AppIcon name="star" :size="22" class="cert-ico" />
+            <b>{{ c.course?.title }}</b>
+            <span class="text-sub mono">{{ c.cert_no }}</span>
+            <span class="text-sub">成绩 {{ c.score }} 分 · {{ fmtDay(c.issued_at) }}</span>
+          </router-link>
+        </div>
+      </el-tab-pane>
+
       <!-- 修改密码 -->
       <el-tab-pane label="修改密码" name="password">
         <el-form ref="pwdRef" :model="pwdForm" :rules="pwdRules" label-position="top" class="panel form-narrow" @submit.prevent>
@@ -196,7 +226,13 @@
             <el-input v-model="pwdForm.confirm" type="password" show-password autocomplete="new-password" />
           </el-form-item>
           <el-button type="primary" :loading="savingPwd" @click="onSavePwd">修改密码</el-button>
+          <p class="text-sub mt-12">修改后，其他设备上的登录会自动失效。</p>
         </el-form>
+        <div class="panel form-narrow mt-16">
+          <h3 class="panel-title">登录设备</h3>
+          <p class="text-sub">怀疑账号在别处登录时，可以让所有设备（包括当前这台）退出，然后重新登录。</p>
+          <el-button @click="onLogoutAll">退出所有设备</el-button>
+        </div>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -207,7 +243,8 @@ import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../../stores/user'
-import { updatePassword } from '../../api/auth'
+import { uploadFile } from '../../api/upload'
+import { getMyCertificates } from '../../api/quiz'
 import { getMyEnrollments, getMyFavorites } from '../../api/course'
 import { getOrders, payOrder, cancelOrder } from '../../api/order'
 import { getMyApplications } from '../../api/job'
@@ -224,11 +261,13 @@ const route = useRoute()
 const router = useRouter()
 const store = useUserStore()
 
-const TAB_NAMES = ['profile', 'learning', 'plans', 'favorites', 'orders', 'applications', 'interviews', 'password']
+const TAB_NAMES = ['profile', 'learning', 'plans', 'favorites', 'orders', 'applications', 'interviews', 'certificates', 'password']
 const tab = ref('profile')
 const favTab = ref('courses')
 
-const profileForm = reactive({ nickname: '', major: '', avatar: '' })
+const profileForm = reactive({ nickname: '', major: '', avatar: '', bio: '', resume_url: '' })
+const uploading = ref('')
+const certificates = ref([])
 const savingProfile = ref(false)
 
 const enrollments = ref([])
@@ -247,7 +286,8 @@ const pwdRules = {
   old_password: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
   new_password: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码至少 6 位', trigger: 'blur' }
+    { min: 8, message: '密码至少 8 位', trigger: 'blur' },
+    { pattern: /^(?=.*[A-Za-z])(?=.*\d).+$/, message: '需要同时包含字母和数字', trigger: 'blur' }
   ],
   confirm: [
     { required: true, message: '请再输一次新密码', trigger: 'blur' },
@@ -278,6 +318,37 @@ function fillProfile() {
   profileForm.nickname = store.user?.nickname || ''
   profileForm.major = store.user?.major || ''
   profileForm.avatar = store.user?.avatar || ''
+  profileForm.bio = store.user?.bio || ''
+  profileForm.resume_url = store.user?.resume_url || ''
+}
+
+async function doUpload(kind, file) {
+  uploading.value = kind
+  try {
+    const res = await uploadFile(kind, file)
+    if (kind === 'avatar') profileForm.avatar = res.url
+    else profileForm.resume_url = res.url
+    await store.updateProfile({ [kind === 'avatar' ? 'avatar' : 'resume_url']: res.url })
+    ElMessage.success(kind === 'avatar' ? '头像已更新' : '简历已上传')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    uploading.value = ''
+  }
+}
+
+async function onLogoutAll() {
+  try {
+    await ElMessageBox.confirm('所有设备都会退出登录，包括当前设备。', '退出所有设备', { type: 'warning', confirmButtonText: '确定退出', cancelButtonText: '取消' })
+  } catch {
+    return
+  }
+  try {
+    await store.logoutAll()
+    router.replace('/login')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 async function onSaveProfile() {
@@ -286,7 +357,8 @@ async function onSaveProfile() {
     await store.updateProfile({
       nickname: profileForm.nickname.trim() || undefined,
       major: profileForm.major.trim() || undefined,
-      avatar: profileForm.avatar.trim()
+      avatar: profileForm.avatar.trim(),
+      bio: profileForm.bio.trim()
     })
     ElMessage.success('资料已保存')
   } catch (e) {
@@ -304,7 +376,7 @@ async function onSavePwd() {
   }
   savingPwd.value = true
   try {
-    await updatePassword({ old_password: pwdForm.old_password, new_password: pwdForm.new_password })
+    await store.changePassword({ old_password: pwdForm.old_password, new_password: pwdForm.new_password })
     ElMessage.success('密码已修改')
     pwdForm.old_password = pwdForm.new_password = pwdForm.confirm = ''
   } catch (e) {
@@ -384,6 +456,7 @@ async function loadByTab(name) {
   else if (name === 'orders') orders.value = await safeLoad(getOrders, [])
   else if (name === 'applications') applications.value = await safeLoad(getMyApplications, [])
   else if (name === 'interviews') interviews.value = await safeLoad(getMyInterviews, [])
+  else if (name === 'certificates') certificates.value = await safeLoad(getMyCertificates, [])
 }
 
 watch(tab, loadByTab)
@@ -579,6 +652,36 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+.upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.resume-link {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.cert-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 12px;
+}
+
+.cert {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink);
+  border-top: 2px solid var(--accent);
+}
+
+.cert-ico {
+  color: var(--accent);
 }
 
 @media (max-width: 768px) {

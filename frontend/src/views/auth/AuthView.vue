@@ -63,7 +63,7 @@
             <el-link type="primary" :underline="false" @click="go('reset')">忘记密码？</el-link>
             <span class="text-sub">没有账号？<el-link type="primary" :underline="false" @click="go('register')">立即注册</el-link></span>
           </div>
-          <div class="demo-tip">
+          <div v-if="store.config.demo_mode" class="demo-tip">
             <span class="mono">DEMO</span>
             <span>学生 student / student123，管理员 admin / admin123</span>
           </div>
@@ -88,7 +88,7 @@
             <el-input v-model="regForm.nickname" placeholder="昵称（可选）" :prefix-icon="Postcard" />
           </el-form-item>
           <el-form-item prop="password">
-            <el-input v-model="regForm.password" type="password" placeholder="密码（至少6位）" show-password :prefix-icon="Lock" />
+            <el-input v-model="regForm.password" type="password" placeholder="密码：至少 8 位，包含字母和数字" show-password :prefix-icon="Lock" />
           </el-form-item>
           <el-form-item prop="confirm">
             <el-input
@@ -117,14 +117,19 @@
           size="large"
           @submit.prevent="doReset"
         >
-          <el-form-item prop="username">
-            <el-input v-model="resetForm.username" placeholder="用户名" :prefix-icon="User" />
-          </el-form-item>
           <el-form-item prop="email">
-            <el-input v-model="resetForm.email" placeholder="注册邮箱" :prefix-icon="Message" />
+            <div class="code-row">
+              <el-input v-model="resetForm.email" placeholder="注册邮箱" :prefix-icon="Message" />
+              <el-button :disabled="countdown > 0" :loading="sending" @click="sendCode">
+                {{ countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
+              </el-button>
+            </div>
+          </el-form-item>
+          <el-form-item prop="code">
+            <el-input v-model="resetForm.code" placeholder="邮件里的 6 位验证码" maxlength="6" :prefix-icon="Message" />
           </el-form-item>
           <el-form-item prop="new_password">
-            <el-input v-model="resetForm.new_password" type="password" placeholder="新密码（至少6位）" show-password :prefix-icon="Lock" />
+            <el-input v-model="resetForm.new_password" type="password" placeholder="新密码：至少 8 位，包含字母和数字" show-password :prefix-icon="Lock" />
           </el-form-item>
           <el-form-item prop="confirm">
             <el-input
@@ -149,12 +154,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Message, Postcard } from '@element-plus/icons-vue'
 import { useUserStore } from '../../stores/user'
-import { resetPassword } from '../../api/auth'
+import { forgotPassword, resetPassword } from '../../api/auth'
 import AppIcon from '../../components/icons/AppIcon.vue'
 import BrandMark from '../../components/icons/BrandMark.vue'
 
@@ -174,7 +179,19 @@ const resetRef = ref()
 
 const loginForm = reactive({ username: '', password: '' })
 const regForm = reactive({ username: '', email: '', nickname: '', password: '', confirm: '' })
-const resetForm = reactive({ username: '', email: '', new_password: '', confirm: '' })
+const resetForm = reactive({ email: '', code: '', new_password: '', confirm: '' })
+const sending = ref(false)
+const countdown = ref(0)
+let timer = null
+
+const PASSWORD_RULE = {
+  validator: (r, v, cb) => {
+    if (!v || v.length < 8) return cb(new Error('密码至少 8 位'))
+    if (!/[A-Za-z]/.test(v) || !/\d/.test(v)) return cb(new Error('密码需要同时包含字母和数字'))
+    cb()
+  },
+  trigger: 'blur'
+}
 
 const loginRules = {
   username: [{ required: true, message: '请输入用户名或邮箱', trigger: 'blur' }],
@@ -190,10 +207,7 @@ const regRules = {
     { required: true, message: '请输入邮箱', trigger: 'blur' },
     { type: 'email', message: '邮箱格式不正确', trigger: 'blur' }
   ],
-  password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码至少 6 位', trigger: 'blur' }
-  ],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }, PASSWORD_RULE],
   confirm: [
     { required: true, message: '请再次输入密码', trigger: 'blur' },
     {
@@ -204,15 +218,12 @@ const regRules = {
 }
 
 const resetRules = {
-  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   email: [
     { required: true, message: '请输入注册邮箱', trigger: 'blur' },
     { type: 'email', message: '邮箱格式不正确', trigger: 'blur' }
   ],
-  new_password: [
-    { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码至少 6 位', trigger: 'blur' }
-  ],
+  code: [{ required: true, message: '请输入验证码', trigger: 'blur' }, { len: 6, message: '验证码是 6 位数字', trigger: 'blur' }],
+  new_password: [{ required: true, message: '请输入新密码', trigger: 'blur' }, PASSWORD_RULE],
   confirm: [
     { required: true, message: '请再次输入新密码', trigger: 'blur' },
     {
@@ -238,7 +249,11 @@ function redirectAfterAuth() {
 }
 
 async function doLogin() {
-  await loginRef.value.validate()
+  try {
+    await loginRef.value.validate()
+  } catch {
+    return
+  }
   loading.value = true
   try {
     await store.login({ username: loginForm.username.trim(), password: loginForm.password })
@@ -252,7 +267,11 @@ async function doLogin() {
 }
 
 async function doRegister() {
-  await regRef.value.validate()
+  try {
+    await regRef.value.validate()
+  } catch {
+    return
+  }
   loading.value = true
   try {
     const payload = {
@@ -271,13 +290,47 @@ async function doRegister() {
   }
 }
 
+async function sendCode() {
+  try {
+    await resetRef.value.validateField('email')
+  } catch {
+    return
+  }
+  sending.value = true
+  try {
+    const res = await forgotPassword(resetForm.email.trim())
+    if (res?.dev_code) {
+      resetForm.code = res.dev_code
+      ElMessage.info('当前环境未配置邮件服务，验证码已自动填入')
+    } else {
+      ElMessage.success('如果该邮箱已注册，验证码已发送，请查收')
+    }
+    countdown.value = 60
+    clearInterval(timer)
+    timer = setInterval(() => {
+      countdown.value -= 1
+      if (countdown.value <= 0) clearInterval(timer)
+    }, 1000)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    sending.value = false
+  }
+}
+
+onBeforeUnmount(() => clearInterval(timer))
+
 async function doReset() {
-  await resetRef.value.validate()
+  try {
+    await resetRef.value.validate()
+  } catch {
+    return
+  }
   loading.value = true
   try {
     await resetPassword({
-      username: resetForm.username.trim(),
       email: resetForm.email.trim(),
+      code: resetForm.code.trim(),
       new_password: resetForm.new_password
     })
     ElMessage.success('密码重置成功，请使用新密码登录')
@@ -288,9 +341,22 @@ async function doReset() {
     loading.value = false
   }
 }
+
+onMounted(() => store.loadConfig())
 </script>
 
 <style scoped>
+.code-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.code-row .el-button {
+  height: 40px;
+  flex-shrink: 0;
+}
+
 .auth-page {
   min-height: 100vh;
   display: flex;
