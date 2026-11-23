@@ -36,29 +36,25 @@ def test_register_login_me(client):
 
 def test_reset_and_change_password(client):
     name = "u" + uuid.uuid4().hex[:8]
-    client.post(
-        "/api/auth/register",
-        json={"username": name, "email": f"{name}@test.com", "password": "abc12345"},
-    )
-    r = client.post(
-        "/api/auth/reset-password",
-        json={"username": name, "email": f"{name}@test.com", "new_password": "newpass123"},
-    )
+    email = f"{name}@test.com"
+    client.post("/api/auth/register", json={"username": name, "email": email, "password": "abc12345"})
+    r = client.post("/api/auth/forgot-password", json={"email": email})
+    assert r.status_code == 200
+    code = r.json()["data"]["dev_code"]  # 测试环境未配置 SMTP，验证码随响应返回
+    bad = client.post("/api/auth/reset-password", json={"email": email, "code": "000000" if code != "000000" else "111111", "new_password": "newpass123"})
+    assert bad.status_code == 400
+    r = client.post("/api/auth/reset-password", json={"email": email, "code": code, "new_password": "newpass123"})
     assert r.status_code == 200 and r.json()["data"]["ok"] is True
+    # 同一验证码不能再用
+    assert client.post("/api/auth/reset-password", json={"email": email, "code": code, "new_password": "other1234"}).status_code == 400
     r = client.post("/api/auth/login", json={"username": name, "password": "newpass123"})
     assert r.status_code == 200
     token = r.json()["data"]["token"]
-    r = client.put(
-        "/api/users/password",
-        json={"old_password": "newpass123", "new_password": "abc12345"},
-        headers=_auth(token),
-    )
+    r = client.put("/api/users/password", json={"old_password": "newpass123", "new_password": "abc12345x"}, headers=_auth(token))
     assert r.status_code == 200
-    r = client.put(
-        "/api/users/profile",
-        json={"nickname": "测试昵称", "major": "人工智能"},
-        headers=_auth(token),
-    )
+    new_token = r.json()["data"]["token"]
+    assert client.get("/api/auth/me", headers=_auth(token)).status_code == 401  # 改密后旧令牌失效
+    r = client.put("/api/users/profile", json={"nickname": "测试昵称", "major": "人工智能"}, headers=_auth(new_token))
     assert r.json()["data"]["nickname"] == "测试昵称"
 
 

@@ -7,12 +7,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import config
+from sqlalchemy import text
+
 from . import models  # noqa: F401  确保模型已注册到 metadata
+from .config import settings
 from .database import Base, SessionLocal, engine, ensure_sqlite_columns
+from .logging_setup import RequestContextMiddleware, setup_logging
+from .services.audit import AuditMiddleware
 from .routers import (
     admin,
     ai,
@@ -22,27 +27,31 @@ from .routers import (
     jobs,
     notifications,
     orders,
+    quizzes,
+    teacher,
+    uploads,
     users,
 )
 from .seed import seed_if_empty
 from .utils import clean_cover, ok
 
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
-)
+setup_logging(settings.log_level, settings.log_json)
 logger = logging.getLogger("edu.app")
+APP_VERSION = "2.0.0"
 
 
 def init_db() -> None:
-    """建表 + 旧库补列 + 空库时写入种子数据（幂等）。"""
-    Base.metadata.create_all(bind=engine)
-    added = ensure_sqlite_columns()
-    if added:
-        logger.info("数据库已补充新增列: %s", ", ".join(added))
+    """开发环境：建表 + 旧库补列；演示模式：空库写入演示数据。生产环境由 alembic 管理表结构。"""
+    if settings.auto_create:
+        Base.metadata.create_all(bind=engine)
+        added = ensure_sqlite_columns()
+        if added:
+            logger.info("数据库已补充新增列: %s", ", ".join(added))
     db = SessionLocal()
     try:
-        seed_if_empty(db)
+        if settings.demo:
+            seed_if_empty(db)
         # 旧库的 emoji 封面统一清空（前端不再使用 emoji 封面）
         fixed = 0
         for c in db.query(models.Course).filter(models.Course.cover != "").all():
@@ -59,24 +68,39 @@ def init_db() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if config.SECRET_KEY == config.DEFAULT_SECRET_KEY:
-        logger.warning("SECRET_KEY 仍为默认开发值，生产环境请通过环境变量 SECRET_KEY 设置随机密钥")
+    if settings.is_production:
+        problems = settings.check_production()
+        if any("SECRET_KEY" in p for p in problems):
+            raise RuntimeError("生产环境配置不合格：" + "；".join(problems))
+        for p in problems:
+            logger.warning("生产环境提示：%s", p)
+    elif settings.secret_key == "edu-ai-platform-dev-secret-key":
+        logger.warning("SECRET_KEY 仍为默认开发值，部署前请在 .env 中设置随机密钥")
+    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     init_db()
+    logger.info("启动完成 env=%s demo=%s db=%s", settings.app_env, settings.demo, engine.url.get_backend_name())
     yield
 
 
-app = FastAPI(title="智慧教育平台 API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="智慧教育平台 API",
+    version=APP_VERSION,
+    lifespan=lifespan,
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None,
+    openapi_url=None if settings.is_production else "/openapi.json",
+)
 
+app.add_middleware(AuditMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=settings.cors_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
+app.add_middleware(RequestContextMiddleware)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -119,13 +143,26 @@ async def unhandled_exception_handler(request, exc: Exception):
 
 @app.get("/api/health")
 def health():
-    return ok({"status": "ok"})
+    """存活 + 数据库连通性检查（供 Docker / 负载均衡探活）。"""
+    db_ok = True
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+        logger.exception("健康检查：数据库不可用")
+    body = {"status": "ok" if db_ok else "degraded", "version": APP_VERSION, "database": "ok" if db_ok else "error"}
+    return JSONResponse(status_code=200 if db_ok else 503, content={"code": 0 if db_ok else 503, "data": body})
 
 
-for _r in (auth, users, courses, jobs, orders, ai, notifications, community, admin):
+for _r in (auth, users, courses, jobs, orders, ai, notifications, community, admin, uploads, quizzes, teacher):
     app.include_router(_r.router)
 app.include_router(courses.lessons_router)
 app.include_router(community.answers_router)
+
+# ---- 上传文件（生产环境建议由 Nginx 直接提供 /uploads/）----
+Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 # ---- 生产模式：托管前端构建产物（SPA history 回退）----
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -134,7 +171,7 @@ if (_FRONTEND_DIST / "index.html").exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
-        if full_path.startswith("api"):
+        if full_path.startswith(("api", "uploads")):
             raise HTTPException(404, "接口不存在")
         if full_path:
             fp = (_FRONTEND_DIST / full_path).resolve()

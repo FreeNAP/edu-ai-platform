@@ -382,4 +382,43 @@ def seed_if_empty(db: Session) -> None:
                content="简单原则：基本类型用 ref；对象想整体替换用 ref，想直接操作属性用 reactive。"),
     ])
 
+    _seed_teacher_and_quizzes(db, teacher, courses)
     db.commit()
+
+
+_AI_QUIZ = [
+    ("single", "监督学习和无监督学习最主要的区别是什么？", ["是否使用神经网络", "训练数据是否带标签", "数据量大小", "是否需要 GPU"], "B", "监督学习的样本带有标签，模型学习输入到标签的映射；无监督学习没有标签。"),
+    ("single", "训练集准确率很高、测试集准确率明显偏低，通常说明出现了？", ["欠拟合", "过拟合", "梯度消失", "数据泄露"], "B", "在训练集上表现好、在新数据上表现差是典型的过拟合。"),
+    ("multiple", "下列哪些方法可以缓解过拟合？", ["增加训练数据", "加入 L2 正则", "提高模型复杂度", "使用 Dropout"], "ABD", "增加数据、正则化和 Dropout 都能降低过拟合；提高复杂度会加重过拟合。"),
+    ("judge", "学习率越大，梯度下降收敛一定越快。", [], "F", "学习率过大会在最优点附近震荡甚至发散，并不一定更快。"),
+    ("single", "二分类问题的输出层通常使用哪个激活函数？", ["ReLU", "Sigmoid", "Tanh", "线性函数"], "B", "Sigmoid 把输出压到 0~1，可以解释为正类的概率。"),
+]
+
+
+def _seed_teacher_and_quizzes(db: Session, teacher: User, courses: list[Course]) -> None:
+    """演示：示例教师负责 AI 方向的课程，并为其配置课时测验与结业考试。"""
+    import json as _json
+
+    from .models import Quiz, QuizQuestion
+
+    ai_courses = [c for c in courses if c.tech_domain == "AI"]
+    for c in ai_courses:
+        c.teacher_id = teacher.id
+    db.flush()
+    for c in ai_courses[:2]:
+        first_lesson = (
+            db.query(Lesson).join(Chapter, Lesson.chapter_id == Chapter.id)
+            .filter(Chapter.course_id == c.id).order_by(Chapter.order_index, Lesson.order_index).first()
+        )
+        for kind, title, items, lesson_id in (
+            ("quiz", "第 1 章随堂测验", _AI_QUIZ[:3], first_lesson.id if first_lesson else None),
+            ("exam", f"《{c.title}》结业考试", _AI_QUIZ, None),
+        ):
+            quiz = Quiz(course_id=c.id, lesson_id=lesson_id, title=title, kind=kind,
+                        pass_score=60, time_limit_minutes=20 if kind == "exam" else 0, max_attempts=3 if kind == "exam" else 0)
+            db.add(quiz)
+            db.flush()
+            for i, (qk, stem, opts, ans, exp) in enumerate(items):
+                db.add(QuizQuestion(quiz_id=quiz.id, kind=qk, stem=stem,
+                                    options=_json.dumps(opts if qk != "judge" else ["正确", "错误"], ensure_ascii=False),
+                                    answer=ans, explanation=exp, score=20, order_index=i))

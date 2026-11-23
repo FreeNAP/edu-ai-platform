@@ -11,6 +11,7 @@ from ..database import get_db
 from ..deps import require_admin
 from ..models import (
     Answer,
+    AuditLog,
     Application,
     Chapter,
     ChatMessage,
@@ -52,7 +53,7 @@ from ..serializers import (
     user_out,
 )
 from ..services.notify import course_favoriter_ids, job_favoriter_ids, notify
-from ..utils import clean_cover, ok, paginate, require_text
+from ..utils import clean_cover, iso, ok, paginate, require_text
 from .auth import create_user_account
 from .community import delete_question_cascade, search_questions
 from .orders import mark_order_paid
@@ -155,12 +156,16 @@ def update_user(
             raise HTTPException(400, "非法角色")
         if user.id == admin.id and body.role != "admin":
             raise HTTPException(400, "不能修改自己的管理员角色")
+        if user.role != body.role:
+            user.token_version = (user.token_version or 0) + 1
         user.role = body.role
     if body.status is not None:
         if body.status not in ("active", "disabled"):
             raise HTTPException(400, "非法状态")
         if user.id == admin.id and body.status != "active":
             raise HTTPException(400, "不能禁用自己的账号")
+        if body.status != user.status:
+            user.token_version = (user.token_version or 0) + 1
         user.status = body.status
     db.commit()
     return ok(user_out(user))
@@ -263,6 +268,7 @@ def create_course(body: AdminCourseIn, db: Session = Depends(get_db)):
         is_free=body.is_free if body.is_free is not None else True,
         price=body.price or 0,
         lecturer_id=body.lecturer_id,
+        teacher_id=body.teacher_id,
         brief=body.brief or "",
         status=body.status or "on",
     )
@@ -288,7 +294,7 @@ def update_course(
     old_status = course.status
     for field in (
         "title", "cover", "category", "tech_domain", "difficulty",
-        "is_free", "price", "lecturer_id", "brief", "status",
+        "is_free", "price", "lecturer_id", "teacher_id", "brief", "status",
     ):
         value = getattr(body, field)
         if value is not None and getattr(course, field) != value:
@@ -343,6 +349,7 @@ def _course_outline(db: Session, course_id: int) -> list[dict]:
                     "duration": ls.duration,
                     "kind": ls.kind,
                     "content": ls.content or "",
+                    "video_url": ls.video_url or "",
                 }
                 for ls in lessons
             ],
@@ -465,6 +472,10 @@ def put_course_outline(
             lesson.duration_minutes = _parse_minutes(duration)
             lesson.kind = ls_in.kind or "video"
             lesson.content = (ls_in.content or "").strip()
+            video = (ls_in.video_url or "").strip()
+            if video and not (video.startswith("/uploads/video/") or re.fullmatch(r"https://[^\s\"'<>]+", video)):
+                raise HTTPException(400, "视频地址只能是上传的视频或 https 链接")
+            lesson.video_url = video
             lesson.order_index = li
     db.flush()
 
@@ -736,3 +747,18 @@ def admin_delete_question(question_id: int, db: Session = Depends(get_db)):
     delete_question_cascade(db, q)
     db.commit()
     return ok({"ok": True})
+
+
+@router.get("/audit-logs")
+def audit_logs(keyword: str | None = None, page: int = 1, size: int = 20, db: Session = Depends(get_db)):
+    """管理员与教师的写操作记录。"""
+    q = db.query(AuditLog)
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.filter((AuditLog.actor_name.like(kw)) | (AuditLog.action.like(kw)) | (AuditLog.detail.like(kw)))
+    q = q.order_by(AuditLog.id.desc())
+    return ok(paginate(q, page, size, lambda a: {
+        "id": a.id, "actor_id": a.actor_id, "actor_name": a.actor_name, "action": a.action,
+        "target_type": a.target_type, "target_id": a.target_id, "detail": a.detail, "ip": a.ip,
+        "created_at": iso(a.created_at),
+    }))

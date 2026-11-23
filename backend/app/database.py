@@ -1,13 +1,30 @@
-"""SQLAlchemy 引擎与会话。"""
-from sqlalchemy import create_engine
+"""SQLAlchemy 引擎与会话。支持 SQLite / PostgreSQL / MySQL。"""
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from . import config
+from .config import settings
 
-_connect_args = (
-    {"check_same_thread": False} if config.DATABASE_URL.startswith("sqlite") else {}
-)
-engine = create_engine(config.DATABASE_URL, connect_args=_connect_args)
+_url = settings.db_url
+_is_sqlite = _url.startswith("sqlite")
+
+if _is_sqlite:
+    engine = create_engine(_url, connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.close()
+else:
+    engine = create_engine(
+        _url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_pool_size,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -22,11 +39,11 @@ def get_db():
 
 
 def ensure_sqlite_columns() -> list[str]:
-    """轻量迁移：SQLite 旧库缺少新增列时自动 ALTER TABLE ADD COLUMN。
+    """开发期轻量补列：SQLite 旧库缺少新增列时 ALTER TABLE ADD COLUMN。
 
-    create_all 只建新表不加列，旧库直接访问新字段会 500。返回补上的列名。
+    生产环境请使用 `alembic upgrade head`。
     """
-    if not str(engine.url).startswith("sqlite"):
+    if not _is_sqlite:
         return []
     from sqlalchemy import inspect, text
 

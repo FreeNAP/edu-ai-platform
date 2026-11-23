@@ -156,6 +156,7 @@ def course_detail(
                         "kind": ls.kind,
                         # 附加字段：课时正文仅对已报名用户下发，避免付费内容泄露
                         "content": (ls.content or "") if enroll else "",
+                        "video_url": (ls.video_url or "") if enroll else "",
                     }
                     for ls in lessons
                 ],

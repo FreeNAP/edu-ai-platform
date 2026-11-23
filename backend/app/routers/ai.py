@@ -2,11 +2,15 @@
 import json
 from datetime import datetime, timedelta
 
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..deps import get_current_user
+from ..services.quota import consume_ai_quota, usage_today
 from ..models import (
     ChatMessage,
     ChatSession,
@@ -27,12 +31,7 @@ from ..utils import iso, ok
 router = APIRouter(prefix="/api/ai", tags=["AI助手"])
 
 
-@router.post("/chat")
-def ai_chat(
-    body: ChatIn,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
+def _prepare_chat(body: ChatIn, user: User, db: Session):
     message = (body.message or "").strip()
     if not message:
         raise HTTPException(400, "消息不能为空")
@@ -45,32 +44,57 @@ def ai_chat(
         if session is None or session.user_id != user.id:
             raise HTTPException(404, "会话不存在")
     else:
-        session = ChatSession(
-            user_id=user.id,
-            course_id=body.course_id,
-            title=message[:20],
-        )
+        session = ChatSession(user_id=user.id, course_id=body.course_id, title=message[:20])
         db.add(session)
         db.flush()
     if body.course_id:
         session.course_id = body.course_id
-
-    # 历史消息（不含本条）
     history = [
         {"role": m.role, "content": m.content}
-        for m in db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session.id)
-        .order_by(ChatMessage.created_at)
-        .all()
+        for m in db.query(ChatMessage).filter(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at).all()
     ]
     db.add(ChatMessage(session_id=session.id, role="user", content=message))
-
-    course = db.get(Course, session.course_id) if session.course_id else None
-    reply = llm.chat_reply(message, course=course, history=history)
-    db.add(ChatMessage(session_id=session.id, role="assistant", content=reply))
     session.updated_at = datetime.now()
     db.commit()
-    return ok({"session_id": session.id, "reply": reply})
+    course = db.get(Course, session.course_id) if session.course_id else None
+    return session.id, message, course, history
+
+
+@router.post("/chat")
+def ai_chat(body: ChatIn, user: User = Depends(consume_ai_quota), db: Session = Depends(get_db)):
+    session_id, message, course, history = _prepare_chat(body, user, db)
+    reply = llm.chat_reply(message, course=course, history=history)
+    db.add(ChatMessage(session_id=session_id, role="assistant", content=reply))
+    db.commit()
+    return ok({"session_id": session_id, "reply": reply})
+
+
+@router.post("/chat/stream")
+def ai_chat_stream(body: ChatIn, user: User = Depends(consume_ai_quota), db: Session = Depends(get_db)):
+    """SSE 流式答疑：事件依次为 meta(session_id) → delta(文本片段)* → done。"""
+    session_id, message, course, history = _prepare_chat(body, user, db)
+    course_snapshot = SimpleNamespace(title=course.title, tech_domain=course.tech_domain, difficulty=course.difficulty, brief=course.brief) if course else None
+
+    def events():
+        yield f"event: meta\ndata: {json.dumps({'session_id': session_id})}\n\n"
+        parts = []
+        try:
+            for chunk in llm.chat_stream(message, course=course_snapshot, history=history):
+                parts.append(chunk)
+                yield f"event: delta\ndata: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
+        finally:
+            reply = "".join(parts) or "（没有生成回复）"
+            with SessionLocal() as s:
+                s.add(ChatMessage(session_id=session_id, role="assistant", content=reply))
+                s.commit()
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/usage")
+def ai_usage(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return ok(usage_today(db, user))
 
 
 @router.get("/chat/sessions")
@@ -144,7 +168,7 @@ def delete_chat_session(
 @router.post("/learning-path")
 def learning_path(
     body: LearningPathIn,
-    user: User = Depends(get_current_user),
+    user: User = Depends(consume_ai_quota),
     db: Session = Depends(get_db),
 ):
     goal = (body.goal or "").strip()
@@ -197,7 +221,7 @@ def delete_learning_plan(
 
 
 @router.post("/grade")
-def grade(body: GradeIn, user: User = Depends(get_current_user)):
+def grade(body: GradeIn, user: User = Depends(consume_ai_quota)):
     if not (body.question or "").strip():
         raise HTTPException(400, "请提供题目描述")
     result = llm.grade_code(body.question, body.code or "", body.language)
@@ -278,7 +302,7 @@ def interview_detail(
 def answer_interview(
     interview_id: int,
     body: InterviewAnswerIn,
-    user: User = Depends(get_current_user),
+    user: User = Depends(consume_ai_quota),
     db: Session = Depends(get_db),
 ):
     interview = _my_interview(db, user, interview_id)

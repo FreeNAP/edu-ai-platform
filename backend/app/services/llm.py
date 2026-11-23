@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 
@@ -31,7 +31,7 @@ def _call_llm(messages: list[dict], temperature: float = 0.6) -> str | None:
                 "messages": messages,
                 "temperature": temperature,
             },
-            timeout=30,
+            timeout=config.settings.ai_timeout_seconds,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -57,8 +57,7 @@ def _extract_json(text: str) -> Any:
     return json.loads(candidate)
 
 
-def chat_reply(message: str, course: Any = None, history: list | None = None) -> str:
-    """多轮答疑。history: [{role, content}]（已含本条 user 消息前的历史）。"""
+def _chat_messages(message: str, course: Any = None, history: list | None = None) -> list[dict]:
     system = (
         "你是智慧教育平台的 AI 学习助手，用中文回答，语气专业且鼓励学习者。"
         "回答结合课程内容，给出知识点拓展，使用 Markdown 排版，长度适中。"
@@ -72,10 +71,49 @@ def chat_reply(message: str, course: Any = None, history: list | None = None) ->
     for h in (history or [])[-10:]:
         msgs.append({"role": h["role"], "content": h["content"]})
     msgs.append({"role": "user", "content": message})
-    reply = _call_llm(msgs)
+    return msgs
+
+
+def chat_reply(message: str, course: Any = None, history: list | None = None) -> str:
+    """多轮答疑。history: [{role, content}]（已含本条 user 消息前的历史）。"""
+    reply = _call_llm(_chat_messages(message, course, history))
     if reply:
         return reply
     return mock_engine.chat_reply(message, course=course, history=history)
+
+
+def chat_stream(message: str, course: Any = None, history: list | None = None) -> Iterator[str]:
+    """流式答疑：逐段产出文本。真实接口失败时无缝回退到内置引擎。"""
+    produced = False
+    if config.AI_API_KEY:
+        try:
+            with httpx.stream(
+                "POST",
+                f"{config.AI_BASE_URL.rstrip('/')}/v1/chat/completions",
+                headers={"Authorization": f"Bearer {config.AI_API_KEY}", "Content-Type": "application/json"},
+                json={"model": config.AI_MODEL, "messages": _chat_messages(message, course, history), "temperature": 0.6, "stream": True},
+                timeout=config.settings.ai_timeout_seconds,
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        break
+                    delta = json.loads(payload)["choices"][0].get("delta", {}).get("content")
+                    if delta:
+                        produced = True
+                        yield delta
+        except Exception:
+            if produced:
+                yield "\n\n（回答中断，请重试）"
+                return
+    if produced:
+        return
+    text = mock_engine.chat_reply(message, course=course, history=history)
+    for i in range(0, len(text), 12):
+        yield text[i:i + 12]
 
 
 def gen_learning_path(goal: str, hours_per_week: int | None, courses: list) -> dict:

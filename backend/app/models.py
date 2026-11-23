@@ -28,6 +28,12 @@ class User(Base):
     role = Column(String(16), default="student", index=True)  # student|teacher|admin
     status = Column(String(16), default="active")  # active|disabled
     password_hash = Column(String(255), nullable=False)
+    bio = Column(Text, default="")
+    resume_url = Column(String(255), default="")  # 简历文件（/uploads/...）
+    token_version = Column(Integer, default=0, nullable=False)  # 改密/禁用时 +1，使旧令牌失效
+    failed_logins = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
 
@@ -53,6 +59,7 @@ class Course(Base):
     students_count = Column(Integer, default=0)
     rating = Column(Float, default=0)
     lecturer_id = Column(Integer, ForeignKey("lecturers.id"))
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)  # 负责该课程的教师账号
     brief = Column(Text, default="")
     status = Column(String(8), index=True, default="on")  # on|off
     created_at = Column(DateTime, default=datetime.now, index=True)
@@ -77,6 +84,7 @@ class Lesson(Base):
     duration_minutes = Column(Integer, default=10)
     kind = Column(String(16), default="video")  # video|article|lab
     content = Column(Text, default="")  # 课时正文（讲解文字）
+    video_url = Column(String(255), default="")  # 视频地址（上传文件或外链）
     order_index = Column(Integer, default=0)
 
 
@@ -154,6 +162,7 @@ class Application(Base):
     user_id = Column(Integer, ForeignKey("users.id"), index=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), index=True)
     message = Column(Text, default="")
+    resume_url = Column(String(255), default="")  # 投递时附带的简历快照
     status = Column(String(16), default="pending", index=True)  # pending|viewed|accepted|rejected
     created_at = Column(DateTime, default=datetime.now)
     __table_args__ = (UniqueConstraint("user_id", "job_id", name="uq_application"),)
@@ -251,3 +260,93 @@ class Answer(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     user = relationship("User")
+
+
+class PasswordResetCode(Base):
+    """找回密码邮件验证码（只存哈希）。"""
+    __tablename__ = "password_reset_codes"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    code_hash = Column(String(128), nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    used = Column(Boolean, default=False, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class AuditLog(Base):
+    """管理员与教师的关键操作审计。"""
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True)
+    actor_name = Column(String(64), default="")
+    action = Column(String(64), index=True, nullable=False)  # 如 course.update
+    target_type = Column(String(32), default="")
+    target_id = Column(String(32), default="")
+    detail = Column(Text, default="")
+    ip = Column(String(64), default="")
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class AiUsage(Base):
+    """每用户每日 AI 调用计数（配额）。"""
+    __tablename__ = "ai_usage"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    day = Column(String(10), nullable=False)  # YYYY-MM-DD
+    count = Column(Integer, default=0, nullable=False)
+    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_ai_usage_day"),)
+
+
+class Quiz(Base):
+    """测验/考试：挂在课时（lesson_id）上为课时测验，挂在课程上（lesson_id 为空）为结业/认证考试。"""
+    __tablename__ = "quizzes"
+    id = Column(Integer, primary_key=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False)
+    lesson_id = Column(Integer, ForeignKey("lessons.id", ondelete="CASCADE"), index=True, nullable=True)
+    title = Column(String(128), nullable=False)
+    kind = Column(String(16), default="quiz")  # quiz|exam
+    pass_score = Column(Integer, default=60)
+    time_limit_minutes = Column(Integer, default=0)  # 0 表示不限时
+    max_attempts = Column(Integer, default=0)  # 0 表示不限次数
+    created_at = Column(DateTime, default=datetime.now)
+
+    questions = relationship("QuizQuestion", order_by="QuizQuestion.order_index", cascade="all, delete-orphan")
+
+
+class QuizQuestion(Base):
+    __tablename__ = "quiz_questions"
+    id = Column(Integer, primary_key=True)
+    quiz_id = Column(Integer, ForeignKey("quizzes.id", ondelete="CASCADE"), index=True, nullable=False)
+    kind = Column(String(16), default="single")  # single|multiple|judge
+    stem = Column(Text, nullable=False)
+    options = Column(Text, default="[]")  # JSON 数组
+    answer = Column(String(64), nullable=False)  # 单选 "B"，多选 "AC"，判断 "T"/"F"
+    explanation = Column(Text, default="")
+    score = Column(Integer, default=10)
+    order_index = Column(Integer, default=0)
+
+
+class QuizAttempt(Base):
+    __tablename__ = "quiz_attempts"
+    id = Column(Integer, primary_key=True)
+    quiz_id = Column(Integer, ForeignKey("quizzes.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    answers = Column(Text, default="{}")  # JSON {question_id: "A"}
+    score = Column(Integer, default=0)
+    total = Column(Integer, default=0)
+    passed = Column(Boolean, default=False)
+    started_at = Column(DateTime, default=datetime.now)
+    submitted_at = Column(DateTime, nullable=True)
+
+
+class Certificate(Base):
+    """通过结业/认证考试后颁发的证书。"""
+    __tablename__ = "certificates"
+    id = Column(Integer, primary_key=True)
+    cert_no = Column(String(32), unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False)
+    score = Column(Integer, default=0)
+    issued_at = Column(DateTime, default=datetime.now)
+    __table_args__ = (UniqueConstraint("user_id", "course_id", name="uq_certificate"),)

@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..services.quota import consume_ai_quota
 from ..deps import get_current_user, get_current_user_optional
 from ..models import Application, Interview, Job, JobFavorite, User
 from ..schemas import ApplyIn
@@ -128,8 +129,11 @@ def apply_job(
     )
     if app:
         return ok(application_out(app, db.get(Job, app.job_id)))
+    resume = (body.resume_url or user.resume_url or "").strip()
+    if resume and not resume.startswith("/uploads/resume/"):
+        raise HTTPException(400, "简历请通过上传功能提交")
     app = Application(
-        user_id=user.id, job_id=job_id, message=(body.message or "").strip(), status="pending"
+        user_id=user.id, job_id=job_id, message=(body.message or "").strip(), resume_url=resume, status="pending"
     )
     db.add(app)
     try:
@@ -150,7 +154,7 @@ def apply_job(
 def create_ai_interview(
     job_id: int,
     body: Optional[ApplyIn] = None,
-    user: User = Depends(get_current_user),
+    user: User = Depends(consume_ai_quota),
     db: Session = Depends(get_db),
 ):
     job = _get_job_or_404(db, job_id)

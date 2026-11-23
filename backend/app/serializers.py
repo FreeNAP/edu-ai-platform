@@ -32,8 +32,11 @@ def user_out(u: User) -> dict:
         "nickname": u.nickname,
         "avatar": u.avatar,
         "major": u.major,
+        "bio": u.bio or "",
+        "resume_url": u.resume_url or "",
         "role": u.role,
         "status": u.status,
+        "last_login_at": iso(u.last_login_at),
         "created_at": iso(u.created_at),
     }
 
@@ -70,6 +73,7 @@ def course_out(c: Course) -> dict:
         "lecturer": lecturer_brief(c.lecturer),
         "brief": c.brief,
         "status": c.status,
+        "teacher_id": c.teacher_id,
         "created_at": iso(c.created_at),
     }
 
@@ -122,6 +126,7 @@ def application_out(a: Application, job: Job | None) -> dict:
         "id": a.id,
         "job": job_out(job) if job else {"id": a.job_id, "title": "(职位已删除)"},
         "message": a.message,
+        "resume_url": a.resume_url or "",
         "status": a.status,
         "created_at": iso(a.created_at),
     }

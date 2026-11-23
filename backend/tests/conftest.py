@@ -9,6 +9,10 @@ sys.path.insert(0, _BACKEND_DIR)
 _TEST_DB = os.path.join(tempfile.gettempdir(), "edu_ai_test.db").replace("\\", "/")
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 os.environ["AI_API_KEY"] = ""  # 强制走内置模拟引擎
+os.environ["EDU_ENV_FILE"] = os.path.join(tempfile.gettempdir(), "edu-test-none.env")  # 不读取开发者本地 .env
+os.environ["APP_ENV"] = "test"
+os.environ["DEMO_MODE"] = "true"
+os.environ["UPLOAD_DIR"] = os.path.join(tempfile.gettempdir(), "edu_test_uploads")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,3 +50,11 @@ def admin_token(client):
     return r.json()["data"]["token"]
 
 
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    from app.ratelimit import reset_all
+
+    reset_all()
+    yield

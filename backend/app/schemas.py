@@ -17,16 +17,26 @@ class LoginIn(BaseModel):
     password: str = Field(max_length=128)
 
 
-class ResetPasswordIn(BaseModel):
-    username: str = Field(max_length=32)
+class ForgotPasswordIn(BaseModel):
     email: str = Field(max_length=128)
+
+
+class ResetPasswordIn(BaseModel):
+    email: str = Field(max_length=128)
+    code: str = Field(min_length=4, max_length=12)
     new_password: str = Field(max_length=128)
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str = Field(max_length=2048)
 
 
 class ProfileIn(BaseModel):
     nickname: Optional[str] = Field(None, max_length=32)
     avatar: Optional[str] = Field(None, max_length=255)
     major: Optional[str] = Field(None, max_length=64)
+    bio: Optional[str] = Field(None, max_length=500)
+    resume_url: Optional[str] = Field(None, max_length=255)
 
 
 class ChangePasswordIn(BaseModel):
@@ -47,6 +57,7 @@ class LessonCompleteIn(BaseModel):
 # ---- 职位 ----
 class ApplyIn(BaseModel):
     message: Optional[str] = Field(None, max_length=1000)
+    resume_url: Optional[str] = Field(None, max_length=255)
 
 
 # ---- AI ----
@@ -109,6 +120,7 @@ class AdminCourseIn(BaseModel):
     is_free: Optional[bool] = None
     price: Optional[float] = Field(None, ge=0, le=100000)
     lecturer_id: Optional[int] = None
+    teacher_id: Optional[int] = None
     brief: Optional[str] = Field(None, max_length=2000)
     status: Optional[str] = None
 
@@ -119,6 +131,7 @@ class OutlineLessonIn(BaseModel):
     duration: Optional[str] = Field(None, max_length=16)
     kind: Optional[str] = "video"
     content: Optional[str] = Field("", max_length=20000)
+    video_url: Optional[str] = Field("", max_length=255)
 
     @field_validator("duration", mode="before")
     @classmethod
@@ -165,3 +178,22 @@ class AdminOrderIn(BaseModel):
 
 class AdminApplicationIn(BaseModel):
     status: Optional[str] = None
+
+
+class QuizQuestionIn(BaseModel):
+    kind: str = Field("single", pattern="^(single|multiple|judge)$")
+    stem: str = Field(min_length=1, max_length=2000)
+    options: list[str] = Field(default_factory=list, max_length=8)
+    answer: str = Field(min_length=1, max_length=8)
+    explanation: Optional[str] = Field("", max_length=2000)
+    score: int = Field(10, ge=1, le=100)
+
+
+class QuizIn(BaseModel):
+    title: str = Field(min_length=1, max_length=128)
+    kind: str = Field("quiz", pattern="^(quiz|exam)$")
+    lesson_id: Optional[int] = None
+    pass_score: int = Field(60, ge=1, le=100)
+    time_limit_minutes: int = Field(0, ge=0, le=600)
+    max_attempts: int = Field(0, ge=0, le=100)
+    questions: list[QuizQuestionIn] = Field(default_factory=list, max_length=200)

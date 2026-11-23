@@ -1,4 +1,5 @@
 """个人信息、我的学习、我的收藏、我的申请（契约第1-3节）。"""
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -18,11 +19,21 @@ from ..models import (
     User,
 )
 from ..schemas import ChangePasswordIn, ProfileIn
-from ..security import hash_password, verify_password
+from ..security import hash_password, password_problem, verify_password
+from .auth import issue_tokens
 from ..serializers import application_out, course_out, interview_out, job_out, user_out
 from ..utils import iso, ok
 
 router = APIRouter(prefix="/api/users", tags=["用户"])
+
+
+def _valid_avatar(v: str) -> bool:
+    return (
+        v == ""
+        or re.fullmatch(r"builtin:[1-8]", v) is not None
+        or v.startswith("/uploads/avatar/")
+        or re.fullmatch(r"https://[^\s\"'<>]+", v) is not None
+    )
 
 
 @router.put("/profile")
@@ -36,7 +47,11 @@ def update_profile(
         if not nickname:
             raise HTTPException(400, "昵称不能为空")
         user.nickname = nickname
-    for field in ("avatar", "major"):
+    if body.avatar is not None and not _valid_avatar(body.avatar.strip()):
+        raise HTTPException(400, "头像只能使用内置图案、上传的图片或 https 图片地址")
+    if body.resume_url is not None and body.resume_url.strip() and not body.resume_url.strip().startswith("/uploads/resume/"):
+        raise HTTPException(400, "简历请通过上传功能提交")
+    for field in ("avatar", "major", "bio", "resume_url"):
         value = getattr(body, field)
         if value is not None:
             setattr(user, field, value.strip())
@@ -52,11 +67,16 @@ def change_password(
 ):
     if not verify_password(body.old_password or "", user.password_hash):
         raise HTTPException(400, "原密码错误")
-    if not body.new_password or len(body.new_password) < 6:
-        raise HTTPException(400, "新密码长度至少 6 位")
+    problem = password_problem(body.new_password or "", user.username)
+    if problem:
+        raise HTTPException(400, problem)
+    if verify_password(body.new_password, user.password_hash):
+        raise HTTPException(400, "新密码不能与原密码相同")
     user.password_hash = hash_password(body.new_password)
+    user.token_version = (user.token_version or 0) + 1  # 其他设备上的登录随之失效
     db.commit()
-    return ok({"ok": True})
+    db.refresh(user)
+    return ok(issue_tokens(user))
 
 
 def _lesson_total(db: Session, course_id: int) -> int:
